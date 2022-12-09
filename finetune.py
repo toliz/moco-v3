@@ -19,14 +19,6 @@ def main(args):
     if args.seed:
         pl.seed_everything(args.seed)
     
-    # Set-up model
-    print('Building ViT...')
-    vit = ViTModule(lr=args.lr, weight_decay=args.weight_decay, max_epochs=args.max_epochs, 
-                    finetune=args.pretrained_path is not None)
-    if args.pretrained_path is not None:
-        moco = MoCo.load_from_checkpoint(args.pretrained_path)
-        vit.load_from_MoCo(moco)
-    
     # Set-up training data
     print('Downloading / Loading dataset...')
     train_dataset = datasets.STL10(
@@ -37,22 +29,35 @@ def main(args):
             transforms.RandomHorizontalFlip(),
             transforms.RandomResizedCrop(size=96),
             transforms.ToTensor(),
-            transforms.Normalize((0.5,), (0.5,)),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
     )
-    test_dataset = datasets.STL10(
+    val_dataset = datasets.STL10(
         root=args.data_dir,
         split='test',
         download=True,
         transform=transforms.Compose([
             transforms.ToTensor(),
-            transforms.Normalize((0.5,), (0.5,)),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
     )
     train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True,
                                   drop_last=True, pin_memory=True, num_workers=args.num_workers)
-    test_dataloader = DataLoader(test_dataset, batch_size=args.batch_size, pin_memory=True,
+    val_dataloader = DataLoader(val_dataset, batch_size=args.batch_size, pin_memory=True,
                                  num_workers=args.num_workers)
+    
+    # Set-up model
+    print('Building ViT...')
+    vit = ViTModule(
+        lr=args.lr,
+        weight_decay=args.weight_decay,
+        warmup_steps=args.warmup_epochs * len(train_dataloader) / num_devices,
+        max_steps=args.max_epochs * len(train_dataloader) / num_devices, 
+        finetune=args.pretrained_path is not None
+    )
+    if args.pretrained_path is not None:
+        moco = MoCo.load_from_checkpoint(args.pretrained_path)
+        vit.load_from_MoCo(moco)
     
     # Train
     logger = TensorBoardLogger(
@@ -69,8 +74,7 @@ def main(args):
         strategy='ddp',
         sync_batchnorm=torch.cuda.device_count() > 1
     )
-    trainer.fit(vit, train_dataloader)
-    trainer.test(vit, test_dataloader)
+    trainer.fit(vit, train_dataloader, val_dataloader)
 
 
 if __name__ == '__main__':
@@ -85,9 +89,11 @@ if __name__ == '__main__':
                         help='Root dir to store STL10')
     
     # Trainer args
-    parser.add_argument('--max-epochs', default=100, type=int, metavar='N',
+    parser.add_argument('--warmup-epochs', default=30, type=int, metavar='N',
+                        help='number of epochs to warmup the learning rate')
+    parser.add_argument('--max-epochs', default=300, type=int, metavar='N',
                         help='number of total epochs to run')
-    parser.add_argument('-b', '--batch-size', default=128, type=int,
+    parser.add_argument('-b', '--batch-size', default=256, type=int,
                         metavar='N',
                         help='mini-batch size (default: 1024), this is the total '
                             'batch size of all GPUs on all nodes when '

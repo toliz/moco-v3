@@ -48,15 +48,8 @@ class MoCo(pl.LightningModule):
             }
         }
     
-    def forward(self, x, momentum=False):
-        if momentum:
-            with torch.no_grad():
-                x = self.momentum_encoder(x)
-        else:
-            x = self.encoder(x)
-            x = self.predictor(x)
-        
-        return x
+    def forward(self, x):
+        return self.momentum_encoder(x)
     
     def contrastive_loss(self, q, k):
         q = nn.functional.normalize(q, dim=1)
@@ -64,30 +57,34 @@ class MoCo(pl.LightningModule):
         
         k = concat_all_gather(k)
         
+        N = q.shape[0]  # batch size per GPU        
         logits = q @ k.T
-        labels = torch.arange(logits.shape[0], device=self.device)
+        labels = (torch.arange(N, dtype=torch.long) + N * torch.distributed.get_rank()).to(device=self.device)
+        
         loss = nn.functional.cross_entropy(logits / self.hparams.tau, labels)
         
         return 2 * self.hparams.tau * loss
-            
-    def on_train_batch_start(self, batch, batch_idx):
+        
+    @torch.no_grad()
+    def _update_momentum_encoder(self, batch_idx):
         # Update mu with a cosine schedule
         current_step = self.current_epoch * self.trainer.num_training_batches + batch_idx
         mu = (1 - (1 + math.cos(math.pi * current_step / self.hparams.max_steps)) / 2) * (1-self.hparams.mu) + self.hparams.mu
         
-        # Update momentum encoder
-        with torch.no_grad():
-            for param, momentum_param in zip(self.encoder.parameters(), self.momentum_encoder.parameters()):
-                momentum_param = momentum_param * mu + param * (1 - mu)
-                
-        self.log('mu', mu)
-        self.log('lr', self.optimizers().optimizer.param_groups[0]['lr'])
+        # Update momentum encoder's parameters
+        for param, param_m in zip(self.encoder.parameters(), self.momentum_encoder.parameters()):
+            param_m.data = param_m.data * mu + param.data * (1. - mu)
         
     def training_step(self, batch, batch_idx):
-        # forward pass
         (imgs_1, imgs_2), _ = batch
-        q1, q2 = self(imgs_1), self(imgs_2)                                 # queries: [batch_size, out_dim] each
-        k1, k2 = self(imgs_1, momentum=True), self(imgs_2, momentum=True)   # keys: [batch_size, out_dim] each
+        
+        # forward pass
+        q1 = self.predictor(self.encoder(imgs_1))
+        q2 = self.predictor(self.encoder(imgs_2))
+        
+        self._update_momentum_encoder(batch_idx)
+        k1 = self.momentum_encoder(imgs_1)
+        k2 = self.momentum_encoder(imgs_2)
         
         # calculate MoCo contrastive loss
         loss = self.contrastive_loss(q1, k2) + self.contrastive_loss(q2, k1)

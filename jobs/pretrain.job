@@ -1,0 +1,20 @@
+#!/bin/bash
+
+#SBATCH --partition=gpu_titanrtx
+#SBATCH --gres=gpu:4
+#SBATCH --job-name=Pretrain-STL10
+#SBATCH --ntasks=4
+#SBATCH --cpus-per-task=6
+#SBATCH --time=01:00:00
+#SBATCH --mem=150000M
+#SBATCH --output=outputs/pretrain_%A.out
+
+module purge
+module load 2021
+module load Anaconda3/2021.05
+
+cd $HOME/moco-toliz
+cp -r $HOME/datasets/stl10_binary $TMPDIR
+
+source activate dino
+srun python pretrain.py --data-dir $TMPDIR --warmup-epochs 5 --max-epochs 15

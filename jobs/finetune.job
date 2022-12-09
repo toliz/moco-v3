@@ -1,0 +1,21 @@
+#!/bin/bash
+
+#SBATCH --partition=gpu_titanrtx_shared
+#SBATCH --gres=gpu:2
+#SBATCH --job-name=Finetune-STL10
+#SBATCH --ntasks=2
+#SBATCH --cpus-per-task=6
+#SBATCH --time=00:30:00
+#SBATCH --mem=75000M
+#SBATCH --output=outputs/finetune_%A.out
+
+module purge
+module load 2021
+module load Anaconda3/2021.05
+
+cd $HOME/moco-toliz
+cp -r $HOME/datasets/stl10_binary $TMPDIR
+
+source activate dino
+srun python -u finetune.py --data-dir $TMPDIR --lr 1e-3 \
+     --pretrained-path tb_logs/pre-train/version_19/checkpoints/epoch=14-step=2925.ckpt

@@ -11,6 +11,7 @@ import torch.optim as optim
 import pytorch_lightning as pl
 from functools import partial, reduce
 from operator import mul
+from utils import CosineAnnealingWithWarmupLR
 
 from timm.models.vision_transformer import VisionTransformer, _cfg
 from timm.models.layers.helpers import to_2tuple
@@ -70,7 +71,7 @@ class ViT(VisionTransformer):
         
         
 class ViTModule(ViT, pl.LightningModule):
-    def __init__(self, num_classes=10, lr=1e-4, weight_decay=0.1, max_epochs=100, finetune=False):
+    def __init__(self, num_classes=10, lr=1e-4, weight_decay=0.1, warmup_steps=1, max_steps=10, finetune=False):
         super(ViTModule, self).__init__(patch_size=8, embed_dim=384, depth=12, num_heads=12, mlp_ratio=4, qkv_bias=True,
         norm_layer=partial(nn.LayerNorm, eps=1e-6))
         self.save_hyperparameters()
@@ -87,10 +88,24 @@ class ViTModule(ViT, pl.LightningModule):
                     param.requires_grad = False
         
     def configure_optimizers(self):
-        optimizer = optim.SGD(self.parameters(), lr=self.hparams.lr, weight_decay=self.hparams.weight_decay)
-        scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=self.hparams.max_epochs, eta_min=2e-2*self.hparams.lr)
-        
-        return [optimizer], [scheduler]
+        if self.hparams.finetune:
+            optimizer = optim.AdamW(self.parameters(), lr=self.hparams.lr, weight_decay=self.hparams.weight_decay)
+            scheduler = optim.lr_scheduler.MultiStepLR(
+                optimizer,
+                milestones=[int(self.hparams.max_steps*0.3), int(self.hparams.max_steps*0.6)],
+                gamma=0.1
+            )
+        else:
+            optimizer = optim.AdamW(self.parameters(), lr=self.hparams.lr, weight_decay=self.hparams.weight_decay)
+            scheduler = CosineAnnealingWithWarmupLR(optimizer, self.hparams.warmup_steps, self.hparams.max_steps)    
+            
+        return {
+            'optimizer': optimizer,
+            'lr_scheduler': {
+                'scheduler': scheduler,
+                'interval': 'step'
+            }
+        }
     
     def load_from_MoCo(self, moco):
         state_dict = {k: v for (k, v) in moco.encoder.state_dict().items() if not k.startswith('head')}

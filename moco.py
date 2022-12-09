@@ -7,6 +7,7 @@ import torch.optim as optim
 import vit
 
 from utils import CosineAnnealingWithWarmupLR
+from utils import concat_all_gather
 
 
 class MoCo(pl.LightningModule):
@@ -54,7 +55,6 @@ class MoCo(pl.LightningModule):
     def contrastive_loss(self, q, k):
         q = nn.functional.normalize(q, dim=1)
         k = nn.functional.normalize(k, dim=1)
-        
         k = concat_all_gather(k)
         
         N = q.shape[0]  # batch size per GPU        
@@ -76,33 +76,20 @@ class MoCo(pl.LightningModule):
             param_m.data = param_m.data * mu + param.data * (1. - mu)
         
     def training_step(self, batch, batch_idx):
-        (imgs_1, imgs_2), _ = batch
-        
-        # forward pass
-        q1 = self.predictor(self.encoder(imgs_1))
-        q2 = self.predictor(self.encoder(imgs_2))
+        (x1, x2), _ = batch
         
         self._update_momentum_encoder(batch_idx)
-        k1 = self.momentum_encoder(imgs_1)
-        k2 = self.momentum_encoder(imgs_2)
+        
+        # encoder forward pass
+        q1 = self.predictor(self.encoder(x1))
+        q2 = self.predictor(self.encoder(x2))
+        
+        # momentum encoder forward pass
+        k1 = self.momentum_encoder(x1)
+        k2 = self.momentum_encoder(x2)
         
         # calculate MoCo contrastive loss
         loss = self.contrastive_loss(q1, k2) + self.contrastive_loss(q2, k1)
         self.log('MoCo-v3 loss', loss)
         
         return loss
-
-
-# utils
-@torch.no_grad()
-def concat_all_gather(tensor):
-    """
-    Performs all_gather operation on the provided tensors.
-    *** Warning ***: torch.distributed.all_gather has no gradient.
-    """
-    tensors_gather = [torch.ones_like(tensor)
-        for _ in range(torch.distributed.get_world_size())]
-    torch.distributed.all_gather(tensors_gather, tensor, async_op=False)
-
-    output = torch.cat(tensors_gather, dim=0)
-    return output

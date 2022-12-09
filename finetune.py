@@ -7,7 +7,6 @@ import torchvision.transforms as transforms
 from moco import MoCo
 from pytorch_lightning.loggers import TensorBoardLogger
 from torch.utils.data import DataLoader
-from utils import ContrastiveTransformations
 from vit import ViTModule
 
 
@@ -19,7 +18,7 @@ def main(args):
     if args.seed:
         pl.seed_everything(args.seed)
     
-    # Set-up training data
+    # Set-up training & evaluation data
     print('Downloading / Loading dataset...')
     train_dataset = datasets.STL10(
         root=args.data_dir,
@@ -29,7 +28,7 @@ def main(args):
             transforms.RandomHorizontalFlip(),
             transforms.RandomResizedCrop(size=96),
             transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+            transforms.Normalize(mean=(0.5,), std=(0.5,)),
         ])
     )
     val_dataset = datasets.STL10(
@@ -38,7 +37,7 @@ def main(args):
         download=True,
         transform=transforms.Compose([
             transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+            transforms.Normalize(mean=(0.5,), std=(0.5,)),
         ])
     )
     train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True,
@@ -89,9 +88,9 @@ if __name__ == '__main__':
                         help='Root dir to store STL10')
     
     # Trainer args
-    parser.add_argument('--warmup-epochs', default=30, type=int, metavar='N',
+    parser.add_argument('--warmup-epochs', default=10, type=int, metavar='N',
                         help='number of epochs to warmup the learning rate')
-    parser.add_argument('--max-epochs', default=300, type=int, metavar='N',
+    parser.add_argument('--max-epochs', default=60, type=int, metavar='N',
                         help='number of total epochs to run')
     parser.add_argument('-b', '--batch-size', default=256, type=int,
                         metavar='N',

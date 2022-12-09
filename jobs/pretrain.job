@@ -5,7 +5,7 @@
 #SBATCH --job-name=Pretrain-STL10
 #SBATCH --ntasks=4
 #SBATCH --cpus-per-task=6
-#SBATCH --time=01:00:00
+#SBATCH --time=01:30:00
 #SBATCH --mem=150000M
 #SBATCH --output=outputs/pretrain_%A.out
 

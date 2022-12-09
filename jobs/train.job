@@ -5,7 +5,7 @@
 #SBATCH --job-name=Train-STL10
 #SBATCH --ntasks=2
 #SBATCH --cpus-per-task=6
-#SBATCH --time=01:30:00
+#SBATCH --time=00:30:00
 #SBATCH --mem=75000M
 #SBATCH --output=outputs/train_%A.out
 
